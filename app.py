@@ -1,10 +1,5 @@
-################################################################################
-### Step 1
-################################################################################
-
+from flask import Flask, request, jsonify
 import requests
-import re
-import urllib.request
 from bs4 import BeautifulSoup
 from collections import deque
 from html.parser import HTMLParser
@@ -20,15 +15,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+app = Flask(__name__)
 
 # Regex pattern to match a URL
 HTTP_URL_PATTERN = r'^http[s]{0,1}://.+$'
 
 # Define OpenAI api_key
-# openai.api_key = process.env.OPENAI_KEY
 openai.api_key = os.getenv("OPENAI_KEY")
-
-
 # Define root domain to crawl
 domain = "techintuitors.com"
 full_url = "https://techintuitors.com/"
@@ -48,13 +41,8 @@ class HyperlinkParser(HTMLParser):
         if tag == "a" and "href" in attrs:
             self.hyperlinks.append(attrs["href"])
 
-################################################################################
-### Step 2
-################################################################################
-
 # Function to get the hyperlinks from a URL
 def get_hyperlinks(url):
-    
     # Try to open the URL and read the HTML
     try:
         # Open the URL and read the HTML
@@ -75,10 +63,6 @@ def get_hyperlinks(url):
     parser.feed(html)
 
     return parser.hyperlinks
-
-################################################################################
-### Step 3
-################################################################################
 
 # Function to get the hyperlinks from a URL that are within the same domain
 def get_domain_hyperlinks(local_domain, url):
@@ -113,11 +97,6 @@ def get_domain_hyperlinks(local_domain, url):
     # Return the list of hyperlinks that are within the same domain
     return list(set(clean_links))
 
-
-################################################################################
-### Step 4
-################################################################################
-
 def crawl(url):
     # Parse the URL and get the domain
     local_domain = urlparse(url).netloc
@@ -130,14 +109,14 @@ def crawl(url):
 
     # Create a directory to store the text files
     if not os.path.exists("text/"):
-            os.mkdir("text/")
+        os.mkdir("text/")
 
     if not os.path.exists("text/"+local_domain+"/"):
-            os.mkdir("text/" + local_domain + "/")
+        os.mkdir("text/" + local_domain + "/")
 
     # Create a directory to store the csv files
     if not os.path.exists("processed"):
-            os.mkdir("processed")
+        os.mkdir("processed")
 
     # While the queue is not empty, continue crawling
     while queue:
@@ -174,21 +153,13 @@ def crawl(url):
 
 crawl(full_url)
 
-################################################################################
-### Step 5
-################################################################################
-
+# Function to remove newlines from a pandas series
 def remove_newlines(serie):
     serie = serie.str.replace('\n', ' ')
     serie = serie.str.replace('\\n', ' ')
     serie = serie.str.replace('  ', ' ')
     serie = serie.str.replace('  ', ' ')
     return serie
-
-
-################################################################################
-### Step 6
-################################################################################
 
 # Create a list to store the text files
 texts=[]
@@ -211,10 +182,6 @@ df['text'] = df.fname + ". " + remove_newlines(df.text)
 df.to_csv('processed/scraped.csv')
 df.head()
 
-################################################################################
-### Step 7
-################################################################################
-
 # Load the cl100k_base tokenizer which is designed to work with the ada-002 model
 tokenizer = tiktoken.get_encoding("cl100k_base")
 
@@ -226,10 +193,6 @@ df['n_tokens'] = df.text.apply(lambda x: len(tokenizer.encode(x)))
 
 # Visualize the distribution of the number of tokens per row using a histogram
 df.n_tokens.hist()
-
-################################################################################
-### Step 8
-################################################################################
 
 max_tokens = 500
 
@@ -290,37 +253,16 @@ for row in df.iterrows():
     else:
         shortened.append( row[1]['text'] )
 
-################################################################################
-### Step 9
-################################################################################
-
 df = pd.DataFrame(shortened, columns = ['text'])
 df['n_tokens'] = df.text.apply(lambda x: len(tokenizer.encode(x)))
 df.n_tokens.hist()
-
-################################################################################
-### Step 10
-################################################################################
-
-# Note that you may run into rate limit issues depending on how many files you try to embed
-# Please check out our rate limit guide to learn more on how to handle this: https://platform.openai.com/docs/guides/rate-limits
 
 df['embeddings'] = df.text.apply(lambda x: openai.Embedding.create(input=x, engine='text-embedding-ada-002')['data'][0]['embedding'])
 df.to_csv('processed/embeddings.csv')
 df.head()
 
-# ################################################################################
-# ### Step 11
-# ################################################################################
-
 df=pd.read_csv('processed/embeddings.csv', index_col=0)
 df['embeddings'] = df['embeddings'].apply(literal_eval).apply(np.array)
-
-df.head()
-
-################################################################################
-### Step 12
-################################################################################
 
 def create_context(
     question, df, max_len=1800, size="ada"
@@ -397,8 +339,12 @@ def answer_question(
         print(e)
         return ""
 
-################################################################################
-### Step 13
-################################################################################
+@app.route('/ask', methods=['POST'])
+def ask_question():
+    data = request.json
+    question = data.get('question', '')
+    response = answer_question(df, question=question, debug=False)
+    return jsonify({'response': response})
 
-print("Response: ",answer_question(df, question="Who are tech intuitors?", debug=False))
+if __name__ == '__main__':
+    app.run(debug=True)
