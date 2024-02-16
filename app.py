@@ -339,6 +339,10 @@ def answer_question(
         print(e)
         return ""
 
+@app.route('/', methods=['GET'])
+def home():
+    return "Hello From Tech Intuitors"
+
 @app.route('/ask', methods=['POST'])
 def ask_question():
     data = request.json
